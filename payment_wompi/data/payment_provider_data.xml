@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="payment_provider_wompi" model="payment.provider">
+        <field name="name">Wompi</field>
+        <field name="code">wompi</field>
+        <field name="redirect_form_view_id" ref="payment.payment_redirect_form" />
+        <field name="state">disabled</field>
+    </record>
+</odoo>
