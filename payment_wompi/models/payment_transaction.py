@@ -22,9 +22,14 @@ class PaymentTransaction(models.Model):
         rendering_values = super()._get_specific_rendering_values(processing_values)
         if self.provider_code != "wompi":
             return rendering_values
+        access_token = (
+            processing_values.get("access_token")
+            or processing_values.get("transaction_access_token")
+            or rendering_values.get("access_token")
+        )
         rendering_values.update({
             "reference": self.reference,
-            "access_token": self.access_token,
+            "access_token": access_token,
         })
         return rendering_values
 
