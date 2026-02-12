@@ -29,6 +29,43 @@ class PaymentProvider(models.Model):
         help="If enabled, the provider uses Wompi's sandbox API.",
     )
 
+    def _wompi_ensure_payment_method_lines(self):
+        method_line_model = self.env.get("payment.method.line")
+        if not method_line_model:
+            return
+
+        payment_method_model = self.env["payment.method"].sudo()
+        method_line_model = method_line_model.sudo()
+        for provider in self.filtered(lambda p: p.code == "wompi"):
+            method_codes = provider._get_default_payment_method_codes()
+            payment_methods = payment_method_model.search([("code", "in", method_codes)])
+            for payment_method in payment_methods:
+                existing_line = method_line_model.search(
+                    [
+                        ("provider_id", "=", provider.id),
+                        ("payment_method_id", "=", payment_method.id),
+                    ],
+                    limit=1,
+                )
+                if not existing_line:
+                    method_line_model.create(
+                        {
+                            "provider_id": provider.id,
+                            "payment_method_id": payment_method.id,
+                        }
+                    )
+
+    @models.model_create_multi
+    def create(self, vals_list):
+        providers = super().create(vals_list)
+        providers._wompi_ensure_payment_method_lines()
+        return providers
+
+    def write(self, vals):
+        result = super().write(vals)
+        self._wompi_ensure_payment_method_lines()
+        return result
+
     def _get_default_payment_method_codes(self):
         default_codes = super()._get_default_payment_method_codes()
         if self.code != "wompi":
