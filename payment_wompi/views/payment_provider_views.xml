@@ -5,13 +5,13 @@
         <field name="model">payment.provider</field>
         <field name="inherit_id" ref="payment.payment_provider_form"/>
         <field name="arch" type="xml">
-            <group name="credentials" position="inside">
-                <group invisible="code != 'wompi'">
+            <xpath expr="//sheet" position="inside">
+                <group string="Wompi" invisible="code != 'wompi'">
                     <field name="wompi_public_key" password="True"/>
                     <field name="wompi_private_key" password="True"/>
                     <field name="wompi_sandbox"/>
                 </group>
-            </group>
+            </xpath>
         </field>
     </record>
 </odoo>
