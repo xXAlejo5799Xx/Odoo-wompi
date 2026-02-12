@@ -2,7 +2,7 @@ import logging
 
 import requests
 
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class PaymentProvider(models.Model):
                         }
                     )
 
-    @models.model_create_multi
+    @api.model_create_multi
     def create(self, vals_list):
         providers = super().create(vals_list)
         providers._wompi_ensure_payment_method_lines()
