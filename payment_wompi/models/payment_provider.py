@@ -106,6 +106,25 @@ class PaymentProvider(models.Model):
             raise ValidationError(_("Configure at least one Wompi API key (private/public)."))
         return tokens
 
+    @staticmethod
+    def _wompi_extract_error_message(response):
+        try:
+            payload = response.json() if response is not None else {}
+        except ValueError:
+            return None
+
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            reason = error.get("reason")
+            message = error.get("messages") or error.get("message")
+            if isinstance(message, list):
+                message = "; ".join(str(m) for m in message)
+            detail = error.get("type")
+            parts = [p for p in (detail, reason, message) if p]
+            if parts:
+                return " - ".join(parts)
+        return None
+
     def _wompi_make_request(self, endpoint, method="GET", payload=None):
         self.ensure_one()
         url = f"{self._wompi_get_api_base().rstrip('/')}/{endpoint.lstrip('/')}"
@@ -133,6 +152,12 @@ class PaymentProvider(models.Model):
                 _logger.warning("Wompi request failed with %s key for %s", token_type, url)
                 if status_code == 401:
                     continue
+                if status_code == 422:
+                    wompi_message = self._wompi_extract_error_message(error.response)
+                    if wompi_message:
+                        raise ValidationError(
+                            _("Wompi rejected the payment link data: %s", wompi_message)
+                        ) from error
                 raise ValidationError(
                     _("Could not connect with Wompi. Technical details: %s", error)
                 ) from error

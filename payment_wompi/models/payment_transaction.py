@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from odoo import _, models
 from odoo.tools import float_round
@@ -42,7 +42,10 @@ class PaymentTransaction(models.Model):
         self.ensure_one()
 
         base_url = self.provider_id.get_base_url()
-        expires_at = (self.create_date + timedelta(hours=12)).isoformat()
+        expires_at = (
+            (self.create_date.replace(tzinfo=timezone.utc) + timedelta(hours=12))
+            .strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        )
         payload = {
             "name": self.reference,
             "description": self.reference,
@@ -52,8 +55,6 @@ class PaymentTransaction(models.Model):
             "redirect_url": f"{base_url}/payment/wompi/return?reference={self.reference}",
             "expires_at": expires_at,
         }
-        webhook_url = f"{base_url}/payment/wompi/webhook"
-        payload["callback_url"] = webhook_url
 
         response = self.provider_id._wompi_make_request("payment_links", method="POST", payload=payload)
         payment_link_data = response.get("data", {})
