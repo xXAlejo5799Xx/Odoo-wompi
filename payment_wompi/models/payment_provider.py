@@ -84,14 +84,23 @@ class PaymentProvider(models.Model):
             return "https://sandbox.wompi.co/v1"
         return "https://production.wompi.co/v1"
 
-    def _wompi_make_request(self, endpoint, method="GET", payload=None):
+    def _wompi_get_auth_header(self):
         self.ensure_one()
         if not self.wompi_private_key:
             raise ValidationError(_("Configure the Wompi private key first."))
 
+        token = self.wompi_private_key.strip()
+        if token.lower().startswith("bearer "):
+            token = token.split(" ", 1)[1].strip()
+        if not token:
+            raise ValidationError(_("Wompi private key is empty."))
+        return f"Bearer {token}"
+
+    def _wompi_make_request(self, endpoint, method="GET", payload=None):
+        self.ensure_one()
         url = f"{self._wompi_get_api_base().rstrip('/')}/{endpoint.lstrip('/')}"
         headers = {
-            "Authorization": f"Bearer {self.wompi_private_key}",
+            "Authorization": self._wompi_get_auth_header(),
             "Content-Type": "application/json",
         }
 
@@ -104,6 +113,20 @@ class PaymentProvider(models.Model):
                 timeout=20,
             )
             response.raise_for_status()
+        except requests.exceptions.HTTPError as error:
+            status_code = error.response.status_code if error.response else None
+            _logger.exception("Wompi request failed for %s", url)
+            if status_code == 401:
+                env_name = _("sandbox") if self.wompi_sandbox else _("production")
+                raise ValidationError(
+                    _(
+                        "Wompi rejected credentials (401 Unauthorized). Verify the private key, remove any duplicated 'Bearer ' prefix, and ensure the key matches the selected environment (%s).",
+                        env_name,
+                    )
+                ) from error
+            raise ValidationError(
+                _("Could not connect with Wompi. Technical details: %s", error)
+            ) from error
         except requests.exceptions.RequestException as error:
             _logger.exception("Wompi request failed for %s", url)
             raise ValidationError(
