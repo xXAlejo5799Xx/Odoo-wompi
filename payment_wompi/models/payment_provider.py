@@ -108,22 +108,41 @@ class PaymentProvider(models.Model):
 
     @staticmethod
     def _wompi_extract_error_message(response):
+        def _flatten(value):
+            if isinstance(value, dict):
+                parts = []
+                for key, item in value.items():
+                    flattened = _flatten(item)
+                    if flattened:
+                        parts.append(f"{key}: {flattened}")
+                return "; ".join(parts)
+            if isinstance(value, (list, tuple)):
+                return "; ".join(filter(None, (_flatten(item) for item in value)))
+            return str(value) if value not in (None, "") else ""
+
         try:
             payload = response.json() if response is not None else {}
         except ValueError:
-            return None
+            return (response.text or "").strip() if response is not None else None
 
-        error = payload.get("error") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return _flatten(payload)
+
+        error = payload.get("error", payload)
         if isinstance(error, dict):
-            reason = error.get("reason")
-            message = error.get("messages") or error.get("message")
-            if isinstance(message, list):
-                message = "; ".join(str(m) for m in message)
-            detail = error.get("type")
-            parts = [p for p in (detail, reason, message) if p]
-            if parts:
-                return " - ".join(parts)
-        return None
+            parts = [
+                error.get("type"),
+                error.get("reason"),
+                _flatten(error.get("message")),
+                _flatten(error.get("messages")),
+                _flatten(error.get("details")),
+            ]
+            message = " - ".join([part for part in parts if part])
+            if message:
+                return message
+
+        fallback = _flatten(payload)
+        return fallback or ((response.text or "").strip() if response is not None else None)
 
     def _wompi_make_request(self, endpoint, method="GET", payload=None):
         self.ensure_one()
@@ -154,10 +173,12 @@ class PaymentProvider(models.Model):
                     continue
                 if status_code == 422:
                     wompi_message = self._wompi_extract_error_message(error.response)
-                    if wompi_message:
-                        raise ValidationError(
-                            _("Wompi rejected the payment link data: %s", wompi_message)
-                        ) from error
+                    raise ValidationError(
+                        _(
+                            "Wompi rejected the payment link data (422). %s",
+                            wompi_message or _("Review currency, amount and payload fields configured for your account."),
+                        )
+                    ) from error
                 raise ValidationError(
                     _("Could not connect with Wompi. Technical details: %s", error)
                 ) from error

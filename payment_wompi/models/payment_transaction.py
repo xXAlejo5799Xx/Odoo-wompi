@@ -3,6 +3,7 @@ from datetime import timedelta, timezone
 
 from odoo import _, models
 from odoo.tools import float_round
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -40,6 +41,9 @@ class PaymentTransaction(models.Model):
 
     def _wompi_create_payment_link(self):
         self.ensure_one()
+
+        if self.currency_id.name != "COP":
+            raise ValidationError(_("Wompi payment links only support COP currency. Current currency: %s", self.currency_id.name))
 
         base_url = self.provider_id.get_base_url()
         expires_at = (
