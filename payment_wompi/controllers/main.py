@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 
@@ -12,13 +13,32 @@ class WompiController(http.Controller):
     _redirect_url = "/payment/wompi/redirect"
     _webhook_url = "/payment/wompi/webhook"
 
+
+
+    @staticmethod
+    def _is_valid_access_token(tx_sudo, access_token):
+        if hasattr(tx_sudo, "_check_access_token"):
+            return tx_sudo._check_access_token(access_token)
+
+        if hasattr(tx_sudo, "_verify_access_token"):
+            try:
+                return tx_sudo._verify_access_token(access_token)
+            except TypeError:
+                return tx_sudo._verify_access_token(access_token=access_token)
+
+        tx_token = getattr(tx_sudo, "access_token", False)
+        if tx_token:
+            return bool(access_token) and hmac.compare_digest(str(tx_token), str(access_token))
+
+        return True
+
     @http.route(_redirect_url, type="http", auth="public", website=True, methods=["POST"], csrf=True)
     def wompi_redirect(self, reference=None, access_token=None, **kwargs):
         tx_sudo = request.env["payment.transaction"].sudo().search(
             [("reference", "=", reference), ("provider_code", "=", "wompi")],
             limit=1,
         )
-        if not tx_sudo or not tx_sudo._check_access_token(access_token):
+        if not tx_sudo or not self._is_valid_access_token(tx_sudo, access_token):
             return request.redirect("/payment/status")
 
         payment_url = tx_sudo._wompi_create_payment_link()
