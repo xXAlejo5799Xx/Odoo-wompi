@@ -84,54 +84,72 @@ class PaymentProvider(models.Model):
             return "https://sandbox.wompi.co/v1"
         return "https://production.wompi.co/v1"
 
-    def _wompi_get_auth_header(self):
-        self.ensure_one()
-        if not self.wompi_private_key:
-            raise ValidationError(_("Configure the Wompi private key first."))
-
-        token = self.wompi_private_key.strip()
+    @staticmethod
+    def _wompi_normalize_token(token):
+        token = (token or "").strip()
         if token.lower().startswith("bearer "):
             token = token.split(" ", 1)[1].strip()
-        if not token:
-            raise ValidationError(_("Wompi private key is empty."))
-        return f"Bearer {token}"
+        return token
+
+    def _wompi_get_auth_tokens(self):
+        self.ensure_one()
+        primary_token = self._wompi_normalize_token(self.wompi_private_key)
+        secondary_token = self._wompi_normalize_token(self.wompi_public_key)
+
+        tokens = []
+        if primary_token:
+            tokens.append(("private", primary_token))
+        if secondary_token and secondary_token != primary_token:
+            tokens.append(("public", secondary_token))
+
+        if not tokens:
+            raise ValidationError(_("Configure at least one Wompi API key (private/public)."))
+        return tokens
 
     def _wompi_make_request(self, endpoint, method="GET", payload=None):
         self.ensure_one()
         url = f"{self._wompi_get_api_base().rstrip('/')}/{endpoint.lstrip('/')}"
-        headers = {
-            "Authorization": self._wompi_get_auth_header(),
-            "Content-Type": "application/json",
-        }
+        response = None
+        last_error = None
 
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                json=payload,
-                timeout=20,
-            )
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as error:
-            status_code = error.response.status_code if error.response else None
-            _logger.exception("Wompi request failed for %s", url)
-            if status_code == 401:
-                env_name = _("sandbox") if self.wompi_sandbox else _("production")
+        for token_type, token in self._wompi_get_auth_tokens():
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    json=payload,
+                    timeout=20,
+                )
+                response.raise_for_status()
+                break
+            except requests.exceptions.HTTPError as error:
+                last_error = error
+                status_code = error.response.status_code if error.response else None
+                _logger.warning("Wompi request failed with %s key for %s", token_type, url)
+                if status_code == 401:
+                    continue
                 raise ValidationError(
-                    _(
-                        "Wompi rejected credentials (401 Unauthorized). Verify the private key, remove any duplicated 'Bearer ' prefix, and ensure the key matches the selected environment (%s).",
-                        env_name,
-                    )
+                    _("Could not connect with Wompi. Technical details: %s", error)
                 ) from error
+            except requests.exceptions.RequestException as error:
+                _logger.exception("Wompi request failed for %s", url)
+                raise ValidationError(
+                    _("Could not connect with Wompi. Technical details: %s", error)
+                ) from error
+        else:
+            env_name = _("sandbox") if self.wompi_sandbox else _("production")
             raise ValidationError(
-                _("Could not connect with Wompi. Technical details: %s", error)
-            ) from error
-        except requests.exceptions.RequestException as error:
-            _logger.exception("Wompi request failed for %s", url)
-            raise ValidationError(
-                _("Could not connect with Wompi. Technical details: %s", error)
-            ) from error
+                _(
+                    "Wompi rejected credentials (401 Unauthorized). Verify your API keys and selected environment (%s). You can place either private or public key fields and the module will try both.",
+                    env_name,
+                )
+            ) from last_error
+
 
         response_data = response.json()
         if response_data.get("error"):
